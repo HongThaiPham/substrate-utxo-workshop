@@ -29,6 +29,9 @@ rustup update nightly
 rustup target add wasm32-unknown-unknown --toolchain nightly
 rustup update stable
 cargo install --git https://github.com/alexcrichton/wasm-gc
+
+rustup toolchain install nightly-2020-06-03
+rustup target add wasm32-unknown-unknown --toolchain nightly-2020-06-03
 ```
 
 ### 2. Clone this workshop

@@ -59,7 +59,13 @@ decl_storage! {
 			.cloned()
 			.map(|u| (BlakeTwo256::hash_of(&u),u))
 			.collect::<Vec<_>>()
-		}): map hasher(identity) H256 => Option<TransactionOutput>
+		}): map hasher(identity) H256 => Option<TransactionOutput>;
+
+
+		/// Total reward value to be redistributed among authorities.
+		/// It is accumulated from transactions during block execution
+		/// and then dispersed to validators on block finalization.
+		pub RewardTotal get(fn reward_total): Value;
 	}
 
 	add_extra_genesis {
@@ -77,12 +83,29 @@ decl_module! {
 			// check the transaction is valid
 			 
 			// write to storage
-			Self::update_storage(&transaction);
+			let reward : Value = 0;
+			Self::update_storage(&transaction, reward);
 
 			// emit success event
 			Self::deposit_event(Event::TransactionSuccess(transaction));
 
 			Ok(())
+		}
+
+		/// Handler called by the system on block finalization
+		fn on_finalize() {
+			let auth: Vec<_> = Aura::authorities().iter().map(|x| {
+				let r: &Public = x.as_ref();
+				r.0.into()
+			}).collect();
+			
+			Self::disperse_reward(&auth);
+			// match T::BlockAuthor::block_author() {
+			// 	// Block author did not provide key to claim reward
+			// 	None => Self::deposit_event(Event::RewardsWasted),
+			// 	// Block author did provide key, so issue thir reward
+			// 	Some(author) => Self::disperse_reward(&author),
+			// }
 		}
 	}
 
@@ -99,7 +122,13 @@ decl_event! {
 impl<T: Trait> Module<T> {
 	/// Update storage to reflect changes made by transaction
 	/// Where each utxo key is a hash of the entire transaction and its order in the TransactionOutputs vector
-	fn update_storage(transaction: &Transaction) -> DispatchResult {
+	fn update_storage(transaction: &Transaction, reward: Value) -> DispatchResult {
+		// Calculate new reward total
+		let new_total = <RewardTotal>::get()
+			.checked_add(reward)
+			.ok_or("Reward overflow")?;
+		<RewardTotal>::put(new_total);
+
 		// Removing spent UTXOs
 		for input in &transaction.inputs {
 			<UtxoStore>::remove(input.outpoint);
@@ -112,6 +141,44 @@ impl<T: Trait> Module<T> {
 			<UtxoStore>::insert(hash, output);
 		}
 		Ok(())
+	}
+
+	/// Redistribute combined reward value to block Author
+	fn disperse_reward(authorities: &[H256]) {
+		//1. devide reward fairly
+		let reward = <RewardTotal>::take();
+		let shared_value: Value = reward
+			.checked_div(authorities.len() as Value)
+			.ok_or("No Authorities")
+			.unwrap();
+
+		if shared_value == 0 { return }
+
+		let remainder = reward
+			.checked_sub(shared_value * authorities.len() as Value)
+			.ok_or("Sub underflow")
+			.unwrap();
+
+		<RewardTotal>::put(remainder as Value);
+
+		//2. Create utxo per validator
+		for authority in authorities {
+			let utxo = TransactionOutput {
+				value: shared_value,
+				pubkey: *authority,
+			};
+
+			let hash = BlakeTwo256::hash_of(&(&utxo, 
+											<system::Module<T>>::block_number().saturated_into::<u64>())
+										);
+			if !<UtxoStore>::contains_key(hash) {
+				<UtxoStore>::insert(hash, utxo);
+				sp_runtime::print("Transaction reward sent to");
+				sp_runtime::print(hash.as_fixed_bytes() as &[u8]);
+			} else {
+				sp_runtime::print("Transaction reward wasted due to hash colission");
+			}
+		}
 	}
 }
 

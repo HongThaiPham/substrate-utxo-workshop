@@ -17,25 +17,38 @@ pub trait Trait: system::Trait {
 	type Event: From<Event> + Into<<Self as system::Trait>::Event>;
 }
 
+/// Single transaction input that refers to one UTXO
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct TransactionInput {
-	pub outpoint: H256, //refernce to UTXO to spend
-	pub sigscript: H512, //proof 
+	/// Reference to an UTXO to be spent
+	pub outpoint: H256,
+	/// Proof that transaction owner is authorized to spend referred UTXO &
+	/// that the entire transaction is untampered
+	pub sigscript: H512, 
 }
 
+pub type Value = u128;
+/// Single transaction output to create upon transaction dispatch
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct TransactionOutput {
-	pub value: Value, //value associated with UTXO
-	pub pubkey: H256, // public key associated with this output, key of UTXO owner
+	/// Value associated with this output
+	pub value: Value, 
+	/// Public key associated with this output. In order to spend this output
+	/// owner must provide a proof by hashing the whole `Transaction` and
+	/// signing it with a corresponding private key.
+	pub pubkey: H256, 
 }
 
+/// Single transaction to be dispatched
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct Transaction {
-	pub input: Vec<TransactionInput>,
-	pub output: Vec<TransactionOutput>
+	/// UTXOs to be used as inputs for current transaction
+	pub inputs: Vec<TransactionInput>,
+	/// UTXOs to be created as a result of current transaction dispatch
+	pub outputs: Vec<TransactionOutput>
 }
 
 decl_storage! {
@@ -64,8 +77,10 @@ decl_module! {
 			// check the transaction is valid
 			 
 			// write to storage
-			
+			Self::update_storage(&transaction);
+
 			// emit success event
+			Self::deposit_event(Event::TransactionSuccess(transaction));
 
 			Ok(())
 		}
@@ -75,9 +90,31 @@ decl_module! {
 
 decl_event! {
 	pub enum Event {
-
+		/// Transaction was executed successfully
+		TransactionSuccess(Transaction),
 	}
 }
+
+
+impl<T: Trait> Module<T> {
+	/// Update storage to reflect changes made by transaction
+	/// Where each utxo key is a hash of the entire transaction and its order in the TransactionOutputs vector
+	fn update_storage(transaction: &Transaction) -> DispatchResult {
+		// Removing spent UTXOs
+		for input in &transaction.inputs {
+			<UtxoStore>::remove(input.outpoint);
+		}
+
+		let mut index: u64 = 0;
+		for output in &transaction.outputs {
+			let hash = BlakeTwo256::hash_of(&(&transaction.encode(), index));
+			index = index.checked_add(1).ok_or("output index overflow")?;
+			<UtxoStore>::insert(hash, output);
+		}
+		Ok(())
+	}
+}
+
 
 /// Tests for this module
 #[cfg(test)]

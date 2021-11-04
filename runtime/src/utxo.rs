@@ -17,9 +17,40 @@ pub trait Trait: system::Trait {
 	type Event: From<Event> + Into<<Self as system::Trait>::Event>;
 }
 
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
+pub struct TransactionInput {
+	pub outpoint: H256, //refernce to UTXO to spend
+	pub sigscript: H512, //proof 
+}
+
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
+pub struct TransactionOutput {
+	pub value: Value, //value associated with UTXO
+	pub pubkey: H256, // public key associated with this output, key of UTXO owner
+}
+
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
+pub struct Transaction {
+	pub input: Vec<TransactionInput>,
+	pub output: Vec<TransactionOutput>
+}
+
 decl_storage! {
 	trait Store for Module<T: Trait> as Utxo {
+		UtxoStore build(|config: &GenesisConfig| {
+			config.genesis_utxo
+			.iter()
+			.cloned()
+			.map(|u| (BlakeTwo256::hash_of(&u),u))
+			.collect::<Vec<_>>()
+		}): map hasher(identity) H256 => Option<TransactionOutput>
+	}
 
+	add_extra_genesis {
+		config(genesis_utxo): Vec<TransactionOutput>
 	}
 }
 
@@ -28,7 +59,18 @@ decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
 
+
+		pub fn spend(_origin, transaction: Transaction) -> DispatchResult {
+			// check the transaction is valid
+			 
+			// write to storage
+			
+			// emit success event
+
+			Ok(())
+		}
 	}
+
 }
 
 decl_event! {
